@@ -1,5 +1,7 @@
+import asyncio
 import os
 import ctypes.util
+import json
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -10,13 +12,12 @@ from discord import Intents, Interaction
 from yt_dlp import YoutubeDL
 
 # Ensure Opus is loaded
-# opus_path = './opus-1.5.2/.libs/libopus.0.dylib'  # For Windows, it could be 'C:/path/to/libopus-0.dll'
 opus_path = './libopus.0.dylib'
 opus.load_opus(opus_path)
+FFMPEG_OPTIONS = {
+        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 if not opus.is_loaded():
     print("Opus not loaded!")
-    # Replace the path with the actual path to the opus library if necessary
-
 
 load_dotenv()
 ctypes.util.find_library('opus')
@@ -24,7 +25,8 @@ ctypes.util.find_library('opus')
 class SystemMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
         super().__init__(command_prefix, description=description, intents=intents)
-        
+        self.queue = []
+
     async def on_ready(self) -> None:
         print(f'Successfully Logged in at {datetime.now()}.')
         print('Ready to ball.')
@@ -33,8 +35,24 @@ class SystemMusic(commands.Bot):
             print(f'Synced {len(synced)} command(s).')
         except Exception as e:
             print(f'Error syncing commands: {e}')
-        
     
+    async def on_disconnect(self) -> None:
+        print("Bot is disconnecting, cleaning up...")
+        # Clean up any active voice clients
+        for vc in self.voice_clients:
+            await vc.disconnect()
+
+    async def play_next(self, guild_id):
+        if len(self.queue) > 0:
+            next_song = self.queue.pop(0)
+            voice = self.get_guild(guild_id).voice_client
+            if voice and not voice.is_playing():
+                print(f'Playing next song: {next_song["title"]}')
+                ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
+                voice.play(FFmpegPCMAudio(next_song['url'], executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id), self.loop))
+        else:
+            print("Queue is empty, nothing to play next.")
+
 client = SystemMusic()
 
 @client.tree.command(
@@ -42,7 +60,6 @@ client = SystemMusic()
     description="Join the voice channel of the user."
 )
 async def join(interaction: Interaction):
-    
     channel = interaction.user.voice.channel
     voice = interaction.guild.voice_client
     
@@ -51,16 +68,14 @@ async def join(interaction: Interaction):
     else:
         voice = await channel.connect()
         
-    interaction.response.send_message("Joined the channel.")
-    
+    await interaction.response.send_message("Joined the channel.")
+
 @client.tree.command(
     name="play",
     description="Play sound from a youtube URL."
 )
 async def play(interaction: Interaction, url: str):
-    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'True'}
-    FFMPEG_OPTIONS = {
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'True', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     
     channel = interaction.user.voice.channel
     voice = interaction.guild.voice_client
@@ -70,17 +85,20 @@ async def play(interaction: Interaction, url: str):
     else:
         voice = await channel.connect()
 
+    with YoutubeDL(YDL_OPTIONS) as ydl:
+        unsanitized_info = ydl.extract_info(url, download=False)
+        URL = unsanitized_info['url']
+        info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
+        title = info['title']
+        
     if not voice.is_playing():
-        with YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=False)
-        URL = info['url']
-        voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS))
-        await interaction.response.send_message('Bot is playing')
-
+        print(f'Playing: {title}')
+        voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id), client.loop))
+        await interaction.response.send_message(f'Now playing: {title}')
     else:
-        await interaction.response.send_message("Bot is already playing")
-        return
-    
+        client.queue.append({'url': URL, 'title': title})
+        await interaction.response.send_message(f'{title} added to queue.')
+
 @client.tree.command(
     name="stop",
     description="Stop the bot from playing."
@@ -89,8 +107,7 @@ async def stop(interaction: Interaction):
     voice = interaction.guild.voice_client
     
     if voice.is_playing():
-        await voice.disconnect()
-        voice.cleanup()
+        voice.stop()
         await interaction.response.send_message("Bot stopped playing.")
     else:
         await interaction.response.send_message("Bot is not playing anything.")
@@ -115,7 +132,7 @@ async def pause(interaction: Interaction):
 async def resume(interaction: Interaction):
     voice = interaction.guild.voice_client
     
-    if not voice.is_playing():
+    if voice.is_paused():
         voice.resume()
         await interaction.response.send_message("Bot resumed.")
     else:

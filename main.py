@@ -1,3 +1,5 @@
+import urllib.request
+import re
 import asyncio
 import os
 import ctypes.util
@@ -74,7 +76,7 @@ async def join(interaction: Interaction):
     name="play",
     description="Play sound from a youtube URL."
 )
-async def play(interaction: Interaction, url: str):
+async def play(interaction: Interaction, url: str | None = None, search: str | None = None):
     YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'True', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     
     channel = interaction.user.voice.channel
@@ -85,14 +87,21 @@ async def play(interaction: Interaction, url: str):
     else:
         voice = await channel.connect()
 
+    if url == None and search == None:
+        await interaction.response.send_message("Please provide a URL or search keyword.")
+        
+    elif url == None and search != None:
+        html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search.replace(' ', '_'))
+        video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
+        url = "https://www.youtube.com/watch?v=" + video_ids[0]
+        
     with YoutubeDL(YDL_OPTIONS) as ydl:
         unsanitized_info = ydl.extract_info(url, download=False)
         URL = unsanitized_info['url']
         info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
         title = info['title']
-        
+    # await interaction.response.defer()
     if not voice.is_playing():
-        print(f'Playing: {title}')
         voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id), client.loop))
         await interaction.response.send_message(f'Now playing: {title}')
     else:
@@ -108,6 +117,8 @@ async def stop(interaction: Interaction):
     
     if voice.is_playing():
         voice.stop()
+        for vc in client.voice_clients:
+            await vc.disconnect()
         await interaction.response.send_message("Bot stopped playing.")
     else:
         await interaction.response.send_message("Bot is not playing anything.")

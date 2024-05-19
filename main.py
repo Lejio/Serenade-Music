@@ -84,17 +84,28 @@ async def join(interaction: Interaction):
     description="Play sound from a youtube URL."
 )
 async def play(interaction: Interaction, url: str | None = None, search: str | None = None):
+    # Check if the guild has a queue
     if interaction.guild_id not in client.queue:
         client.queue[interaction.guild_id] = []
+        
+    # Get the voice channel of the user
     text_channel = interaction.channel
+    # Get the voice channel of the user
     channel = interaction.user.voice.channel
+    # Get the voice client of the guild
     voice = interaction.guild.voice_client
+    
+    # Path to the ffmpeg executable
     ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
+    # Check if the bot is already in a voice channel
     if voice and voice.is_connected():
+        # Move the bot to the user's voice channel
         await voice.move_to(channel)
     else:
+        # Connect the bot to the user's voice channel
         voice = await channel.connect()
 
+    # Check if the user provided a URL or search keyword
     if url == None and search == None:
         await interaction.response.send_message("Please provide a URL or search keyword.")
     elif url != None and search == None:

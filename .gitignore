@@ -1,7 +1,10 @@
 .env
+/spotipy_test.py
 /.venv
 /.DS_Store
 /opus-1.5.2
 /system_music.py
 /ffmpeg.exe
 /yt_search_script.py
+/__pycache__
+/.cache

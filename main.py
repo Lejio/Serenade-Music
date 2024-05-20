@@ -14,7 +14,7 @@ from discord import FFmpegPCMAudio, Intents, opus
 from discord import Intents, Interaction, Thread
 
 from yt_dlp import YoutubeDL
-from pytube import Playlist, YouTube
+from pytube import Playlist
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy import Spotify
 

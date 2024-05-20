@@ -1,3 +1,4 @@
+from typing import Optional, Union
 import urllib.request
 import re
 import asyncio
@@ -7,14 +8,17 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 
+from discord.abc import GuildChannel, PrivateChannel
 from discord.ext import commands
 from discord import FFmpegPCMAudio, Intents, opus
-from discord import Intents, Interaction
+from discord import Intents, Interaction, Thread
 
 from yt_dlp import YoutubeDL
-from pytube import Playlist
+from pytube import Playlist, YouTube
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy import Spotify
+
+InteractionChannel = Optional[Union[GuildChannel, PrivateChannel, Thread]]
 
 # Ensure Opus is loaded
 opus_path = './libopus.0.dylib'
@@ -22,6 +26,10 @@ opus.load_opus(opus_path)
 YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'True', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 FFMPEG_OPTIONS = {
         'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
+YOUTUBE_URL = "https://www.youtube.com/watch?v="
+YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list="
+SPOTIFY_PLAYLIST_URL = "https://open.spotify.com/playlist"
 if not opus.is_loaded():
     print("Opus not loaded!")
 
@@ -32,8 +40,9 @@ class SystemMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
         super().__init__(command_prefix, description=description, intents=intents)
         self.queue = {}
-        self.client_credentials_manager = SpotifyClientCredentials(client_id=os.environ.get('SPOTIFY_CLIENT_ID'), client_secret=os.environ.get('SPOTIFY_CLIENT_SECRET'))
-        self.sp = Spotify(client_credentials_manager=self.client_credentials_manager)
+        self.client_credentials_manager: SpotifyClientCredentials = SpotifyClientCredentials(client_id=os.environ.get('SPOTIFY_CLIENT_ID'), client_secret=os.environ.get('SPOTIFY_CLIENT_SECRET'))
+        self.sp: Spotify = Spotify(client_credentials_manager=self.client_credentials_manager)
+        self.current_song: str | None = None
 
     async def on_ready(self) -> None:
         print(f'Successfully Logged in at {datetime.now()}.')
@@ -50,9 +59,8 @@ class SystemMusic(commands.Bot):
         for vc in self.voice_clients:
             await vc.disconnect()
 
-    async def play_next(self, guild_id):
+    async def play_next(self, guild_id: int, channel: InteractionChannel) -> None:
         if len(self.queue[guild_id]) > 0:
-            # print(f"The next song is {next_song}")
             voice = self.get_guild(guild_id).voice_client
             if voice and not voice.is_playing():
                 next_song = self.queue[guild_id].pop(0)
@@ -60,10 +68,12 @@ class SystemMusic(commands.Bot):
                     unsanitized_info = ydl.extract_info(next_song['url'], download=False)
                     URL = unsanitized_info['url']
                     info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
-                    title = info['title']
-                print(f'Playing next song: {title}')
+                    # print(info)
+                    # if info['title'] != "videoplayback" and info['title'] != None:
+                    self.current_song = next_song['title']
+                        # print(self.current_song)
                 ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
-                voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id), self.loop))
+                voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id, channel), self.loop))
         else:
             print("Queue is empty, nothing to play next.")
 
@@ -94,7 +104,8 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         client.queue[interaction.guild_id] = []
         
     # Get the voice channel of the user
-    text_channel = interaction.channel
+    # text_channel = interaction.channel
+    await interaction.response.defer()
     # Get the voice channel of the user
     channel = interaction.user.voice.channel
     # Get the voice client of the guild
@@ -113,49 +124,63 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
     # Check if the user provided a URL or search keyword
     if url == None and search == None:
         await interaction.response.send_message("Please provide a URL or search keyword.")
+        return
     elif url != None and search == None:
-        if "https://www.youtube.com/playlist?list=" in url:
+        playlist = []
+        if YOUTUBE_PLAYLIST_URL in url:
             p = Playlist(url)
-            playlist = []
             for video in p.videos:
-                playlist.append(video.title)
+                playlist.append(f"{video.title} by {video.author}")
                 client.queue[interaction.guild_id].append({'url': video.watch_url, 'title': video.title})
-            await text_channel.send(f'Playlist added to queue: {playlist}')
-            curr_song = client.queue[interaction.guild_id].pop(0)
-            url = curr_song['url']
-        elif "https://open.spotify.com/playlist" in url:
+            await client.play_next(interaction.guild_id, interaction.channel)
+            await interaction.followup.send(f"Playlist added to queue: {playlist}")
+            return
+            
+        elif SPOTIFY_PLAYLIST_URL in url:
             spotify_pl = client.sp.playlist(url)
             if spotify_pl == None:
                 await interaction.response.send_message("Invalid Spotify playlist URL.")
                 return
             for song in spotify_pl['tracks']['items']:
+                # song = item['track']
                 track = song['track']
-                title = track['name']
+                name = track['name']
                 artist = ', '.join([artist['name'] for artist in track['artists']])
-                search = f"{title} {artist}"
-                html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search.replace(' ', '_'))
+                title = f"{name} by {artist}"
+                playlist.append(title)
+                html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + title.replace(' ', '_'))
                 video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
-                url = "https://www.youtube.com/watch?v=" + video_ids[0]
+                url = YOUTUBE_URL + video_ids[0]
                 client.queue[interaction.guild_id].append({'url': url, 'title': title})
-                
-                await client.play_next(interaction.guild_id)
-            await text_channel.send("Spotify playlist added to queue.")
+            await interaction.followup.send(f"Spotify playlist added to queue: {playlist}")
+            await client.play_next(interaction.guild_id, interaction.channel)
+            return
+            
     elif url == None and search != None:
-        html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search.replace(' ', '_'))
+        html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + search.replace(' ', '_'))
         video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
-        url = "https://www.youtube.com/watch?v=" + video_ids[0]
+        url = YOUTUBE_URL + video_ids[0]
+        # print(url)
+        # return
         
     with YoutubeDL(YDL_OPTIONS) as ydl:
         unsanitized_info = ydl.extract_info(url, download=False)
         URL = unsanitized_info['url']
         info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
+        # print(info)
         title = info['title']
+        client.queue[interaction.guild_id].append({'url': URL, 'title': title})
     if not voice.is_playing():
-        voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id), client.loop))
-        await interaction.response.send_message(f'Now playing: {title}')
+        # voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id, interaction.channel), client.loop))
+        # await interaction.response.send_message(f'Now playing: {title}')
+        await interaction.followup.send(f'Now playing: {title}')
+        await client.play_next(interaction.guild_id, interaction.channel)
+        # await interaction.response.send_message(f'Now playing: {title}')
+        return
     else:
         client.queue[interaction.guild_id].append({'url': URL, 'title': title})
-        await interaction.response.send_message(f'{title} added to queue.')
+        await interaction.followup.send(f"Added to queue: {title}")
+        return
 
 @client.tree.command(
     name="stop",
@@ -204,12 +229,12 @@ async def resume(interaction: Interaction):
 )
 async def skip(interaction: Interaction):
     voice = interaction.guild.voice_client
-    
+    await interaction.response.defer()
     if voice.is_playing():
         voice.stop()
-        await client.play_next(interaction.guild_id)
-        print(f"Songs left in queue: {client.queue[interaction.guild_id]}")
-        await interaction.response.send_message("Song skipped.")
+        await interaction.followup.send(f"Skipping {client.current_song}")
+        await client.play_next(interaction.guild_id, interaction.channel)
+        # print(f"Songs left in queue: {client.queue[interaction.guild_id]}")
     else:
         await interaction.response.send_message("Bot is not playing anything.")
 

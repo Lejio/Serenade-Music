@@ -13,6 +13,9 @@ from discord import Intents, Interaction
 
 from yt_dlp import YoutubeDL
 from pytube import Playlist
+from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy import Spotify
+
 # Ensure Opus is loaded
 opus_path = './libopus.0.dylib'
 opus.load_opus(opus_path)
@@ -29,6 +32,8 @@ class SystemMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
         super().__init__(command_prefix, description=description, intents=intents)
         self.queue = {}
+        self.client_credentials_manager = SpotifyClientCredentials(client_id=os.environ.get('SPOTIFY_CLIENT_ID'), client_secret=os.environ.get('SPOTIFY_CLIENT_SECRET'))
+        self.sp = Spotify(client_credentials_manager=self.client_credentials_manager)
 
     async def on_ready(self) -> None:
         print(f'Successfully Logged in at {datetime.now()}.')
@@ -109,7 +114,7 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
     if url == None and search == None:
         await interaction.response.send_message("Please provide a URL or search keyword.")
     elif url != None and search == None:
-        if "playlist" in url:
+        if "https://www.youtube.com/playlist?list=" in url:
             p = Playlist(url)
             playlist = []
             for video in p.videos:
@@ -118,6 +123,23 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
             await text_channel.send(f'Playlist added to queue: {playlist}')
             curr_song = client.queue[interaction.guild_id].pop(0)
             url = curr_song['url']
+        elif "https://open.spotify.com/playlist" in url:
+            spotify_pl = client.sp.playlist(url)
+            if spotify_pl == None:
+                await interaction.response.send_message("Invalid Spotify playlist URL.")
+                return
+            for song in spotify_pl['tracks']['items']:
+                track = song['track']
+                title = track['name']
+                artist = ', '.join([artist['name'] for artist in track['artists']])
+                search = f"{title} {artist}"
+                html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search.replace(' ', '_'))
+                video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
+                url = "https://www.youtube.com/watch?v=" + video_ids[0]
+                client.queue[interaction.guild_id].append({'url': url, 'title': title})
+                
+                await client.play_next(interaction.guild_id)
+            await text_channel.send("Spotify playlist added to queue.")
     elif url == None and search != None:
         html = urllib.request.urlopen("https://www.youtube.com/results?search_query=" + search.replace(' ', '_'))
         video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())

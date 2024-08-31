@@ -1,4 +1,3 @@
-import html
 from typing import Optional, Union
 import urllib.request
 import re
@@ -12,8 +11,12 @@ from dotenv import load_dotenv
 
 from discord.abc import GuildChannel, PrivateChannel
 from discord.ext import commands
-from discord import FFmpegPCMAudio, Intents, opus
+from discord import Colour, Embed, FFmpegPCMAudio, Intents, opus
 from discord import Intents, Interaction, Thread
+from Requestor import QueueItem, Requestor, RequestorDict
+from viewer import SongViewer
+from songembed import SongEmbed
+from testembed import TestEmbed
 
 from yt_dlp import YoutubeDL
 from pytube import Playlist
@@ -46,7 +49,7 @@ load_dotenv()
 # Double check if the Opus library is loaded
 ctypes.util.find_library('opus')
 
-def add_to_queue_from_search(query: str, guild_id: int) -> bool:
+def add_to_queue_from_search(query: str, requestor: Requestor) -> bool:
     """Adds a song to the queue from a search string.\n
     
     The query is used to search for a song on YouTube. The first video URL is then added to the queue.\n
@@ -73,13 +76,15 @@ def add_to_queue_from_search(query: str, guild_id: int) -> bool:
     url = YOUTUBE_URL + video_ids[0] # Constructs the URL of the first video result
     # print("URL search:", url)
     with YoutubeDL(YDL_OPTIONS) as ydl:
-        info = ydl.extract_info(url, download=False) # Extracts the info of the video
+        unsanitized_info = ydl.extract_info(url, download=False) # Extracts the info of the video
+        info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
         title = info['title'] # Extracts the title of the video
         # print(title)
-        client.queue[guild_id].append({'url': info['url'], 'title': title}) # Appends the video URL and title to the queue
+        song = SongEmbed(song=info)
+        qitem: QueueItem = {'url': url, 'title': title, 'embed': song}
+        requestor.queue.append(qitem) # Appends the video URL and title to the queue
 
-
-async def add_to_queue_async(query: str, guild_id: int) -> bool:
+async def add_to_queue_async(query: str, guild_id: int, requestor: Requestor) -> bool:
     """Asyncio wrapper for add_to_queue_from_search().\n
     Helps with the blocking nature of add_to_queue_from_search().\n
     
@@ -96,7 +101,7 @@ async def add_to_queue_async(query: str, guild_id: int) -> bool:
     Returns:
         bool: Returns true if the song was added to the queue, false otherwise.
     """
-    return await asyncio.to_thread(add_to_queue_from_search, query, guild_id)
+    return await asyncio.to_thread(add_to_queue_from_search, query, requestor)
         
 def construct_search_query(name: str, artists: list) -> str:
     """Constructs a search query from a song name and a list of artists.\n
@@ -115,6 +120,7 @@ class SystemMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
         super().__init__(command_prefix, description=description, intents=intents)
         self.queue = {}
+        self.viewer = {} # Single viewer for the bot for now.
         self.client_credentials_manager: SpotifyClientCredentials = SpotifyClientCredentials(client_id=os.environ.get('SPOTIFY_CLIENT_ID'), client_secret=os.environ.get('SPOTIFY_CLIENT_SECRET'))
         self.sp: Spotify = Spotify(client_credentials_manager=self.client_credentials_manager)
         self.current_song: str | None = None
@@ -134,11 +140,11 @@ class SystemMusic(commands.Bot):
         for vc in self.voice_clients:
             await vc.disconnect()
 
-    async def play_next(self, guild_id: int, channel: InteractionChannel) -> None:
-        if len(self.queue[guild_id]) > 0:
+    async def play_next(self, guild_id: int, requestor: Requestor) -> None:
+        if len(self.queue[guild_id]['queue']) > 0:
             voice = self.get_guild(guild_id).voice_client
             if voice and not voice.is_playing():
-                next_song = self.queue[guild_id].pop(0)
+                next_song = self.queue[guild_id]['queue'].pop(0)
                 with YoutubeDL(YDL_OPTIONS) as ydl:
                     unsanitized_info = ydl.extract_info(next_song['url'], download=False)
                     URL = unsanitized_info['url']
@@ -147,13 +153,14 @@ class SystemMusic(commands.Bot):
                     # if info['title'] != "videoplayback" and info['title'] != None:
                     self.current_song = next_song['title']
                         # print(self.current_song)
-                await channel.send(f'Now playing: {self.current_song}')
+                await requestor.text_channel.send(f'Now playing: {self.current_song}')
                 ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
-                voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id, channel), self.loop))
+                voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id, requestor), self.loop))
         else:
             print("Queue is empty, nothing to play next.")
 
 client = SystemMusic()
+# client.add_view(SongViewer([], timeout=None))
 
 @client.tree.command(
     name="join",
@@ -162,13 +169,19 @@ client = SystemMusic()
 async def join(interaction: Interaction):
     channel = interaction.user.voice.channel
     voice = interaction.guild.voice_client
+    await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Joining voice channel..."))
+    message = None
     
     if voice and voice.is_connected():
         await voice.move_to(channel)
     else:
         voice = await channel.connect()
         
-    await interaction.response.send_message("Joined the channel.")
+    pages = [TestEmbed(name=interaction.user.display_name, icon=interaction.user.display_icon),
+             TestEmbed(name=interaction.user.display_name, icon=interaction.user.display_icon)]
+    testview = client.viewer if client.viewer else SongViewer(pages, timeout=None)
+    message = await interaction.original_response()
+    await testview.send(message=message)
 
 @client.tree.command(
     name="play",
@@ -177,10 +190,23 @@ async def join(interaction: Interaction):
 async def play(interaction: Interaction, url: str | None = None, search: str | None = None):
     # Check if the guild has a queue
     if interaction.guild_id not in client.queue:
-        client.queue[interaction.guild_id] = []
+        data: RequestorDict = {
+        "queue": [],
+        "text_channel": interaction.channel,  # or a GuildChannel/PrivateChannel/Thread object
+        "viewer": SongViewer([], timeout=None)
+        }
+        client.queue[interaction.guild_id] = data
+        # client.viewer[interaction.guild_id] = {}
+        # Get the voice channel of the user
+        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Joining voice channel..."))
+    elif interaction.channel_id != client.queue[interaction.guild_id]['text_channel']:
+        await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."))
+        return
+    
+    
         
-    # Get the voice channel of the user
-    await interaction.response.defer()
+    requestor: Requestor = Requestor(client.queue[interaction.guild_id])
+    client.queue[interaction.guild_id] = requestor
     # Get the voice channel of the user
     channel = interaction.user.voice.channel
     # Get the voice client of the guild
@@ -197,7 +223,7 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
 
     # Check if the user provided a URL or search keyword
     if url == None and search == None:
-        await interaction.followup.send("Please provide a URL or search keyword.")
+        await requestor.text_channel.send(embed=Embed(colour=Colour.red(), title="Please provide a URL or search keyword."), ephemeral=True)
         return
     elif url != None and search == None:
         playlist = []
@@ -206,18 +232,21 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
             p = Playlist(url)
             for video in p.videos:
                 playlist.append(f"{video.title} by {video.author}")
-                client.queue[interaction.guild_id].append({'url': video.watch_url, 'title': video.title})
-            await client.play_next(interaction.guild_id, interaction.channel)
-            await interaction.followup.send(f"Playlist added to queue: {playlist}")
+                print("Metadata", video.metadata)
+                song = SongEmbed(song=video.metadata)
+                qitem: QueueItem = {'url': video.watch_url, 'title': video.title, 'embed': song}
+                requestor.queue.append(qitem)
+            await client.play_next(interaction.guild_id, requestor)
             return
             
+        # ================== SPOTIFY ==================
         elif SPOTIFY_PLAYLIST_URL in url or "open.spotify.com/track" in url:
             # try:
                 if "playlist" in url or "album" in url:
                     print("Spotify Playlist URL")
                     spotify_pl = client.sp.playlist(url)
                     if spotify_pl is None:
-                        await interaction.followup.send("Invalid Spotify playlist URL.")
+                        await requestor.text_channel.send(embed=Embed(colour=Colour.red(), title="Cannot find Spotify playlist."), ephemeral=True)
                         return
 
                     # Process Spotify Playlist
@@ -225,9 +254,10 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
                         track = song['track']
                         title = construct_search_query(track['name'], track['artists'])
                         playlist.append(title)
-                        await add_to_queue_async(query=title, guild_id=interaction.guild_id)
+                        # =============== Add to Queue ===============
+                        await add_to_queue_async(query=title, guild_id=interaction.guild_id, requestor=requestor)
                         if not voice.is_playing():
-                            await client.play_next(interaction.guild_id, interaction.channel)
+                            await client.play_next(interaction.guild_id, requestor)
 
                 else:
                     # Process a Single Spotify Track
@@ -236,10 +266,10 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
                     print("Spotify Track:", title)
                     await add_to_queue_async(query=title, guild_id=interaction.guild_id)
                     if not voice.is_playing():
-                        await client.play_next(interaction.guild_id, interaction.channel)
+                        await client.play_next(interaction.guild_id, requestor)
 
-                await interaction.followup.send(f"Spotify song(s) added to queue: {playlist}")
-                await client.play_next(interaction.guild_id, interaction.channel)
+                await requestor.text_channel.send(f"Spotify song(s) added to queue: {playlist}")
+                await client.play_next(interaction.guild_id, requestor)
                 return
             # except Exception as e:
             #     await interaction.followup.send(f"Error processing Spotify URL: {str(e)}")
@@ -254,9 +284,12 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         unsanitized_info = ydl.extract_info(url, download=False)
         URL = unsanitized_info['url']
         info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
-        title = info['title'].encode('utf-8')
+        title = info['title']
         print("Playing song:", title)
-        client.queue[interaction.guild_id].append({'url': URL, 'title': title})
+        song = SongEmbed(song=info)
+        qitem: QueueItem = {'url': URL, 'title': title, 'embed': song}
+        requestor.queue.append(qitem)
+        
     if not voice.is_playing():
         # voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id, interaction.channel), client.loop))
         # await interaction.response.send_message(f'Now playing: {title}')
@@ -265,8 +298,10 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         # await interaction.response.send_message(f'Now playing: {title}')
         return
     else:
-        client.queue[interaction.guild_id].append({'url': URL, 'title': title})
-        await interaction.followup.send(f"Added to queue: {title}")
+        song = SongEmbed(song=info)
+        qitem: QueueItem = {'url': URL, 'title': title, 'embed': song}
+        requestor.queue.append(qitem)
+        await requestor.text_channel.send(f"Added to queue: {title}")
         return
     
 @client.tree.command(

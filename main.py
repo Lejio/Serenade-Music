@@ -7,7 +7,6 @@ import os
 import ctypes.util
 import json
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
 
@@ -21,53 +20,94 @@ from pytube import Playlist
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy import Spotify
 
+# Type hint for the channel
 InteractionChannel = Optional[Union[GuildChannel, PrivateChannel, Thread]]
 
 # Ensure Opus is loaded
 opus_path = './libopus.0.dylib'
 opus.load_opus(opus_path)
+if not opus.is_loaded():
+    print("Opus not loaded!")
+
+# YoutubeDL Options
 YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist': 'True', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-FFMPEG_OPTIONS = {
-        'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
+# FFMPEG Options
+FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
+# Constants
 YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 YOUTUBE_URL = "https://www.youtube.com/watch?v="
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list="
 SPOTIFY_PLAYLIST_URL = "https://open.spotify.com/playlist"
-executor = ThreadPoolExecutor(max_workers=5)
-if not opus.is_loaded():
-    print("Opus not loaded!")
 
+# Load environment variables
 load_dotenv()
+# Double check if the Opus library is loaded
 ctypes.util.find_library('opus')
 
+def add_to_queue_from_search(query: str, guild_id: int) -> bool:
+    """Adds a song to the queue from a search string.\n
+    
+    The query is used to search for a song on YouTube. The first video URL is then added to the queue.\n
+    Ex: query = "Simple by BBHF"\n
+    This function is used in junction with construct_search_query().\n
 
-def sanitize_title(title: str) -> str:
-    # Decode HTML entities and replace problematic characters
-    title = html.unescape(title)  # Decode HTML entities
-    # Replace or remove characters not supported by ASCII
-    title = title.encode('ascii', 'ignore').decode('utf-8')
-    title = re.sub(r'[\\/*?:"<>|]', "", title)  # Remove characters not allowed in file names
-    return title
+    Args:
+        query (str): The search string.
+        guild_id (int): The guild ID.
+    Returns:
+        bool: Returns true if the song was added to the queue, false otherwise.
+    """
+    
+    # print("Search keyword:", query)
+    encoded_query = urllib.parse.quote(query) # Parses query and changes all non-english characters into percent encoding
+    search_keyword = YOUTUBE_SEARCH_URL + encoded_query # Appends the encoded query to the YouTube search URL
+    html = urllib.request.urlopen(search_keyword) # Opens the URL
+    # print("Inside query search:", search_keyword)
+    video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode('utf-8')) # Finds all video IDs in the HTML
+    
+    if not video_ids: # If no video IDs are found, return False
+        return False
+    
+    url = YOUTUBE_URL + video_ids[0] # Constructs the URL of the first video result
+    # print("URL search:", url)
+    with YoutubeDL(YDL_OPTIONS) as ydl:
+        info = ydl.extract_info(url, download=False) # Extracts the info of the video
+        title = info['title'] # Extracts the title of the video
+        # print(title)
+        client.queue[guild_id].append({'url': info['url'], 'title': title}) # Appends the video URL and title to the queue
 
-async def add_to_queue_from_search(interaction: Interaction, query: str):
-    """Search for a YouTube video by query and add it to the queue."""
-    try:
-        html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + query.replace(' ', '_'))
-        video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode('utf-8'))
-        if not video_ids:
-            await interaction.followup.send(f"No results found for '{query}'.")
-            return
-        url = YOUTUBE_URL + video_ids[0]
-        with YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = sanitize_title(info['title'])
-            client.queue[interaction.guild_id].append({'url': info['url'], 'title': title})
-            await interaction.followup.send(f"Added to queue: {title}")
-    except Exception as e:
-        await interaction.followup.send(f"Error fetching YouTube video for '{query}': {str(e)}")
+
+async def add_to_queue_async(query: str, guild_id: int) -> bool:
+    """Asyncio wrapper for add_to_queue_from_search().\n
+    Helps with the blocking nature of add_to_queue_from_search().\n
+    
+    Adds a song to the queue from a search string.
+    
+    The query is used to search for a song on YouTube. The first video URL is then added to the queue.\n
+    Ex: query = "Simple by BBHF"\n
+    This function is used in junction with construct_search_query().
+
+    Args:
+        query (str): The search string
+        guild_id (int): The guild ID
+
+    Returns:
+        bool: Returns true if the song was added to the queue, false otherwise.
+    """
+    return await asyncio.to_thread(add_to_queue_from_search, query, guild_id)
         
 def construct_search_query(name: str, artists: list) -> str:
-    """Construct a YouTube search query from a Spotify track's name and artist list."""
+    """Constructs a search query from a song name and a list of artists.\n
+
+    Args:
+        name (str): Name of the song
+        artists (list): List of artists
+
+    Returns:
+        str: The constructed search query in the format "name by artist1, artist2, artist3"
+    """
     artist_names = ', '.join(artist['name'] for artist in artists)
     return f"{name} by {artist_names}"
 
@@ -107,6 +147,7 @@ class SystemMusic(commands.Bot):
                     # if info['title'] != "videoplayback" and info['title'] != None:
                     self.current_song = next_song['title']
                         # print(self.current_song)
+                await channel.send(f'Now playing: {self.current_song}')
                 ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
                 voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id, channel), self.loop))
         else:
@@ -139,7 +180,6 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         client.queue[interaction.guild_id] = []
         
     # Get the voice channel of the user
-    # text_channel = interaction.channel
     await interaction.response.defer()
     # Get the voice channel of the user
     channel = interaction.user.voice.channel
@@ -147,7 +187,6 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
     voice = interaction.guild.voice_client
     
     # Path to the ffmpeg executable
-    # ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
     # Check if the bot is already in a voice channel
     if voice and voice.is_connected():
         # Move the bot to the user's voice channel
@@ -173,8 +212,8 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
             return
             
         elif SPOTIFY_PLAYLIST_URL in url or "open.spotify.com/track" in url:
-            try:
-                if "playlist" in url:
+            # try:
+                if "playlist" in url or "album" in url:
                     print("Spotify Playlist URL")
                     spotify_pl = client.sp.playlist(url)
                     if spotify_pl is None:
@@ -185,37 +224,38 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
                     for song in spotify_pl['tracks']['items']:
                         track = song['track']
                         title = construct_search_query(track['name'], track['artists'])
-                        print("Title of song:", title)
                         playlist.append(title)
-                        await add_to_queue_from_search(interaction, title)
+                        await add_to_queue_async(query=title, guild_id=interaction.guild_id)
+                        if not voice.is_playing():
+                            await client.play_next(interaction.guild_id, interaction.channel)
+
                 else:
                     # Process a Single Spotify Track
-                    print("Spotify Track URL")
                     track = client.sp.track(url)
                     title = construct_search_query(track['name'], track['artists'])
-                    print("Title of song:", title)
-                    await add_to_queue_from_search(interaction, title)
+                    print("Spotify Track:", title)
+                    await add_to_queue_async(query=title, guild_id=interaction.guild_id)
+                    if not voice.is_playing():
+                        await client.play_next(interaction.guild_id, interaction.channel)
 
                 await interaction.followup.send(f"Spotify song(s) added to queue: {playlist}")
                 await client.play_next(interaction.guild_id, interaction.channel)
                 return
-            except Exception as e:
-                await interaction.followup.send(f"Error processing Spotify URL: {str(e)}")
-                return
+            # except Exception as e:
+            #     await interaction.followup.send(f"Error processing Spotify URL: {str(e)}")
+            #     return
             
     elif url == None and search != None:
         html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + search.replace(' ', '_'))
         video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
         url = YOUTUBE_URL + video_ids[0]
-        # print(url)
-        # return
         
     with YoutubeDL(YDL_OPTIONS) as ydl:
         unsanitized_info = ydl.extract_info(url, download=False)
         URL = unsanitized_info['url']
         info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
-        # print(info)
-        title = info['title']
+        title = info['title'].encode('utf-8')
+        print("Playing song:", title)
         client.queue[interaction.guild_id].append({'url': URL, 'title': title})
     if not voice.is_playing():
         # voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id, interaction.channel), client.loop))
@@ -228,18 +268,37 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         client.queue[interaction.guild_id].append({'url': URL, 'title': title})
         await interaction.followup.send(f"Added to queue: {title}")
         return
+    
+@client.tree.command(
+    name="current-song",
+    description="Get the current song playing."
+)
+async def current_song(interaction: Interaction):
+    """Prints the current song playing.
+
+    Args:
+        interaction (Interaction): Discord interaction object.
+    """
+    await interaction.response.send_message(f"Currently playing: {client.current_song}")
 
 @client.tree.command(
     name="stop",
     description="Stop the bot from playing."
 )
 async def stop(interaction: Interaction):
-    voice = interaction.guild.voice_client
+    """Stops the bot from playing and disconnects from the voice channel.\n
+    The bot will also clear the queue for that guild.
+
+    Args:
+        interaction (Interaction): Discord interaction object.
+    """
+    voice = interaction.guild.voice_client # Get the voice client of the guild
     
-    if voice.is_playing():
+    if voice.is_playing(): # If the bot is playing, stop it
         voice.stop()
-        for vc in client.voice_clients:
+        for vc in client.voice_clients: # Disconnect from the voice channel
             await vc.disconnect()
+        client.queue[interaction.guild_id] = [] # Clear the queue
         await interaction.response.send_message("Bot stopped playing.")
     else:
         await interaction.response.send_message("Bot is not playing anything.")
@@ -249,9 +308,14 @@ async def stop(interaction: Interaction):
     description="Pause the bot from playing."
 )
 async def pause(interaction: Interaction):
+    """Pauses the bot from playing.
+
+    Args:
+        interaction (Interaction): Discord interaction object.
+    """
     voice = interaction.guild.voice_client
     
-    if voice.is_playing():
+    if voice.is_playing(): # If the bot is playing, pause it
         voice.pause()
         await interaction.response.send_message("Bot paused.")
     else:
@@ -262,6 +326,11 @@ async def pause(interaction: Interaction):
     description="Resume the bot from playing."
 )
 async def resume(interaction: Interaction):
+    """Resumes the bot from playing.
+
+    Args:
+        interaction (Interaction): Discord interaction object.
+    """
     voice = interaction.guild.voice_client
     
     if voice.is_paused():

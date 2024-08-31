@@ -1,3 +1,4 @@
+import html
 from typing import Optional, Union
 import urllib.request
 import re
@@ -6,6 +7,8 @@ import os
 import ctypes.util
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+
 from dotenv import load_dotenv
 
 from discord.abc import GuildChannel, PrivateChannel
@@ -30,11 +33,43 @@ YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 YOUTUBE_URL = "https://www.youtube.com/watch?v="
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list="
 SPOTIFY_PLAYLIST_URL = "https://open.spotify.com/playlist"
+executor = ThreadPoolExecutor(max_workers=5)
 if not opus.is_loaded():
     print("Opus not loaded!")
 
 load_dotenv()
 ctypes.util.find_library('opus')
+
+
+def sanitize_title(title: str) -> str:
+    # Decode HTML entities and replace problematic characters
+    title = html.unescape(title)  # Decode HTML entities
+    # Replace or remove characters not supported by ASCII
+    title = title.encode('ascii', 'ignore').decode('utf-8')
+    title = re.sub(r'[\\/*?:"<>|]', "", title)  # Remove characters not allowed in file names
+    return title
+
+async def add_to_queue_from_search(interaction: Interaction, query: str):
+    """Search for a YouTube video by query and add it to the queue."""
+    try:
+        html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + query.replace(' ', '_'))
+        video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode('utf-8'))
+        if not video_ids:
+            await interaction.followup.send(f"No results found for '{query}'.")
+            return
+        url = YOUTUBE_URL + video_ids[0]
+        with YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = sanitize_title(info['title'])
+            client.queue[interaction.guild_id].append({'url': info['url'], 'title': title})
+            await interaction.followup.send(f"Added to queue: {title}")
+    except Exception as e:
+        await interaction.followup.send(f"Error fetching YouTube video for '{query}': {str(e)}")
+        
+def construct_search_query(name: str, artists: list) -> str:
+    """Construct a YouTube search query from a Spotify track's name and artist list."""
+    artist_names = ', '.join(artist['name'] for artist in artists)
+    return f"{name} by {artist_names}"
 
 class SystemMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
@@ -112,7 +147,7 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
     voice = interaction.guild.voice_client
     
     # Path to the ffmpeg executable
-    ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
+    # ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
     # Check if the bot is already in a voice channel
     if voice and voice.is_connected():
         # Move the bot to the user's voice channel
@@ -123,11 +158,12 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
 
     # Check if the user provided a URL or search keyword
     if url == None and search == None:
-        await interaction.response.send_message("Please provide a URL or search keyword.")
+        await interaction.followup.send("Please provide a URL or search keyword.")
         return
     elif url != None and search == None:
         playlist = []
         if YOUTUBE_PLAYLIST_URL in url:
+            print("Youtube Playlist URL")
             p = Playlist(url)
             for video in p.videos:
                 playlist.append(f"{video.title} by {video.author}")
@@ -136,25 +172,36 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
             await interaction.followup.send(f"Playlist added to queue: {playlist}")
             return
             
-        elif SPOTIFY_PLAYLIST_URL in url:
-            spotify_pl = client.sp.playlist(url)
-            if spotify_pl == None:
-                await interaction.response.send_message("Invalid Spotify playlist URL.")
+        elif SPOTIFY_PLAYLIST_URL in url or "open.spotify.com/track" in url:
+            try:
+                if "playlist" in url:
+                    print("Spotify Playlist URL")
+                    spotify_pl = client.sp.playlist(url)
+                    if spotify_pl is None:
+                        await interaction.followup.send("Invalid Spotify playlist URL.")
+                        return
+
+                    # Process Spotify Playlist
+                    for song in spotify_pl['tracks']['items']:
+                        track = song['track']
+                        title = construct_search_query(track['name'], track['artists'])
+                        print("Title of song:", title)
+                        playlist.append(title)
+                        await add_to_queue_from_search(interaction, title)
+                else:
+                    # Process a Single Spotify Track
+                    print("Spotify Track URL")
+                    track = client.sp.track(url)
+                    title = construct_search_query(track['name'], track['artists'])
+                    print("Title of song:", title)
+                    await add_to_queue_from_search(interaction, title)
+
+                await interaction.followup.send(f"Spotify song(s) added to queue: {playlist}")
+                await client.play_next(interaction.guild_id, interaction.channel)
                 return
-            for song in spotify_pl['tracks']['items']:
-                # song = item['track']
-                track = song['track']
-                name = track['name']
-                artist = ', '.join([artist['name'] for artist in track['artists']])
-                title = f"{name} by {artist}"
-                playlist.append(title)
-                html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + title.replace(' ', '_'))
-                video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
-                url = YOUTUBE_URL + video_ids[0]
-                client.queue[interaction.guild_id].append({'url': url, 'title': title})
-            await interaction.followup.send(f"Spotify playlist added to queue: {playlist}")
-            await client.play_next(interaction.guild_id, interaction.channel)
-            return
+            except Exception as e:
+                await interaction.followup.send(f"Error processing Spotify URL: {str(e)}")
+                return
             
     elif url == None and search != None:
         html = urllib.request.urlopen(YOUTUBE_SEARCH_URL + search.replace(' ', '_'))

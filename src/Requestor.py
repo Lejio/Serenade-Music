@@ -1,7 +1,7 @@
 from typing import Optional, TypedDict, Union
 from discord.abc import GuildChannel, PrivateChannel
 from discord import Thread
-from viewer import SongViewer
+from viewer import SongBook
 from songembed import SongEmbed
 
 InteractionChannel = Optional[Union[GuildChannel, PrivateChannel, Thread]]
@@ -14,7 +14,7 @@ class QueueItem(TypedDict):
 class RequestorDict(TypedDict):
     queue: list[QueueItem]
     text_channel: InteractionChannel
-    viewer: SongViewer
+    viewer: SongBook
 
 class Requestor:
     

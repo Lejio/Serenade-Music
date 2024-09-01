@@ -14,7 +14,7 @@ from discord.ext import commands
 from discord import Colour, Embed, FFmpegPCMAudio, Intents, opus
 from discord import Intents, Interaction, Thread
 from Requestor import QueueItem, Requestor, RequestorDict
-from viewer import SongViewer
+from viewer import SongBook
 from songembed import SongEmbed
 from testembed import TestEmbed
 
@@ -120,7 +120,6 @@ class SystemMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
         super().__init__(command_prefix, description=description, intents=intents)
         self.queue = {}
-        self.viewer = {} # Single viewer for the bot for now.
         self.client_credentials_manager: SpotifyClientCredentials = SpotifyClientCredentials(client_id=os.environ.get('SPOTIFY_CLIENT_ID'), client_secret=os.environ.get('SPOTIFY_CLIENT_SECRET'))
         self.sp: Spotify = Spotify(client_credentials_manager=self.client_credentials_manager)
         self.current_song: str | None = None
@@ -177,11 +176,16 @@ async def join(interaction: Interaction):
     else:
         voice = await channel.connect()
         
-    pages = [TestEmbed(name=interaction.user.display_name, icon=interaction.user.display_icon),
-             TestEmbed(name=interaction.user.display_name, icon=interaction.user.display_icon)]
-    testview = client.viewer if client.viewer else SongViewer(pages, timeout=None)
     message = await interaction.original_response()
-    await testview.send(message=message)
+        
+    songs = [TestEmbed(name=interaction.user.display_name, icon=interaction.user.display_icon),
+             TestEmbed(name=interaction.user.display_name, icon=interaction.user.display_icon)]
+    
+    paginated_queue = [TestEmbed(name="Goofy Shit", icon=interaction.user.display_icon),
+             TestEmbed(name="LMAO", icon=interaction.user.display_icon)]
+    testview = SongBook(songs=songs, paginated_queue=paginated_queue, message=message)
+    
+    await testview.send()
 
 @client.tree.command(
     name="play",
@@ -190,23 +194,20 @@ async def join(interaction: Interaction):
 async def play(interaction: Interaction, url: str | None = None, search: str | None = None):
     # Check if the guild has a queue
     if interaction.guild_id not in client.queue:
-        data: RequestorDict = {
+        requestor: RequestorDict = {
         "queue": [],
         "text_channel": interaction.channel,  # or a GuildChannel/PrivateChannel/Thread object
-        "viewer": SongViewer([], timeout=None)
+        "book": SongBook([], [])
         }
-        client.queue[interaction.guild_id] = data
-        # client.viewer[interaction.guild_id] = {}
-        # Get the voice channel of the user
+        client.queue[interaction.guild_id] = requestor
         await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Joining voice channel..."))
     elif interaction.channel_id != client.queue[interaction.guild_id]['text_channel']:
-        await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."))
+        await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."), ephemeral=True)
         return
     
     
         
     requestor: Requestor = Requestor(client.queue[interaction.guild_id])
-    client.queue[interaction.guild_id] = requestor
     # Get the voice channel of the user
     channel = interaction.user.voice.channel
     # Get the voice client of the guild

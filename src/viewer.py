@@ -1,19 +1,34 @@
-from discord import Embed
+from discord import Colour, Embed
 from discord.ui import View, Button, Select, Item, button
 from discord import Embed, InteractionMessage, Interaction, SelectOption
-from songembed import SongEmbed
+from songembed import QueueEmbed, SongEmbed
 
-class SongViewer(View):
-    def __init__(self, pages: list[Embed], timeout: int):
+
+# pages if pages else Embed(
+#     colour=Colour.blue(),
+#     title="Joining voice channel...",
+# )
+class Chapter(View):
+    def __init__(self, pages: list[Embed], timeout: int | None = 100):
         super().__init__(timeout=timeout)
         self.pages = pages
-        self.page_len = len(pages)
+        self.page_len = len(self.pages)
+        self.curr_page = 0
+        if self.page_len == 1:
+            self.nextButton.disabled = True
+            
+    def set_pages(self, pages: list[Embed]):
+        self.pages = pages
+        self.page_len = len(self.pages)
+        if self.page_len == 1:
+            self.nextButton.disabled = True
 
-    async def send(self, message: InteractionMessage):
+    async def send(self, message: InteractionMessage, select: Select):
         self.curr_page = 0
         # Make custom select object that is able to do callback functions.
         # Add Embeds to a list and somehow make the buttons show each embed
         self.prevButton.disabled = True
+        self.add_item(select)
         await message.edit(embed=self.pages[self.curr_page], view=self)
         self.message = message
 
@@ -21,7 +36,6 @@ class SongViewer(View):
     async def prevButton(self, interaction: Interaction, button: Button):
         await interaction.response.defer()
         self.curr_page -= 1
-        # print('Previous new page:', self.curr_page)
 
         if self.curr_page == 0:
             # print('Disabling')
@@ -36,27 +50,58 @@ class SongViewer(View):
     async def nextButton(self, interaction: Interaction, button: Button):
         await interaction.response.defer()
         self.curr_page += 1
-        # print('Next new page:', self.curr_page)
 
         if self.curr_page + 1 == self.page_len:
-            # print('Disabling')
             self.nextButton.disabled = True
             self.prevButton.disabled = False
         else:
             self.prevButton.disabled = False
 
         await self.message.edit(embed=self.pages[self.curr_page], view=self)
+        
+class SystemContents(dict):
+    def __init__(self, songs: list[SongEmbed], paginated_queue: list[QueueEmbed]) -> None:
+        self["Queue"] = Chapter(pages=paginated_queue) # This would be a list of paginated songs (Queue Embeds)
+        self["Songs"] = Chapter(pages=songs) # This would be a list of Song Embeds, giving more detail about each song.
 
 
-class ViewerSelection(Select):
-    # Takes in the message and edits it based on the version selected.
-    def __init__(self, selections: list) -> None:
-        options = [SelectOption(label=v, value=v) for v in selections]
+class SongBook(Select):
+    def __init__(self, songs: list[SongEmbed], paginated_queue: list[QueueEmbed], message: InteractionMessage) -> None:
+        self.contents_dictionary = SystemContents(songs, paginated_queue)
+        options = [SelectOption(label=v, value=v) for v in self.contents_dictionary]
         super().__init__(min_values=1, max_values=1, options=options)
-
+        self.message = message
         self.options[0].default = True
+        self.default_val = self.options[0]
+        self.key_values = ["Queue", "Songs"]
+        self.songs = songs
+        self.paginated_queue = paginated_queue
 
+    async def send(self, songs: list[SongEmbed] | None = None, paginated_queue: list[QueueEmbed] | None = None):
+        if songs:
+            self.songs = songs
+            self.paginated_queue = paginated_queue
+        # This should be the default sending of the Embed, therefore it should display the first version of the pokemon every single time.
+        queue_viewer = Chapter(self.paginated_queue)
+
+        await queue_viewer.send(message=self.message, select=self)
+        
     async def callback(self, interaction: Interaction):
-        await interaction.response.send_message(
-            f"Selected: {self.values[0]}", ephemeral=True
-        )
+        
+        # NOTE: You can make the options have emojis!!
+
+        self.default_val.default = False
+        chap = None
+        value = self.values[0]
+
+        match value:
+            case "Queue":
+                chap = Chapter(self.paginated_queue)
+            case "Songs":
+                chap = Chapter(self.songs)
+                
+        self.options[self.key_values.index(value)].default = True
+        self.default_val = self.options[self.key_values.index(value)]
+
+        await interaction.response.defer()
+        await chap.send(message=self.message, select=self)

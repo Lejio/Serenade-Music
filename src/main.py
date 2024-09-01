@@ -215,6 +215,7 @@ async def join(interaction: Interaction):
 )
 async def play(interaction: Interaction, url: str | None = None, search: str | None = None):
     # Check if the guild has a queue
+    
     if interaction.guild_id not in client.queue:
         await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Loading..."))
         msg = await interaction.original_response()
@@ -224,6 +225,7 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         "book": SongBook(message=msg)
         }
         client.queue[interaction.guild_id] = requestor
+        print(client.queue[interaction.guild_id]['text_channel'].id)
         
     elif interaction.channel_id != client.queue[interaction.guild_id]['text_channel'].id:
         await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."), ephemeral=True)
@@ -405,10 +407,12 @@ async def skip(interaction: Interaction):
     await interaction.response.defer()
     if voice.is_playing():
         voice.stop()
-        await interaction.followup.send(f"Skipping {client.current_song}")
-        await client.play_next(interaction.guild_id, interaction.channel)
+        requestor: Requestor = client.queue[interaction.guild_id]
+        requestor.queue.pop(0)
+        await interaction.followup.send(f"Skipping {client.current_song}", ephemeral=True, delete_after=10)
+        await client.play_next(interaction.guild_id, requestor)
         # print(f"Songs left in queue: {client.queue[interaction.guild_id]}")
     else:
-        await interaction.response.send_message("Bot is not playing anything.")
+        await interaction.followup.send("Bot is not playing anything.", ephemeral=True, delete_after=10)
 
 client.run(os.environ.get('DISCORD_TOKEN'))

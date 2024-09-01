@@ -29,6 +29,8 @@ class Chapter(View):
         # Add Embeds to a list and somehow make the buttons show each embed
         self.prevButton.disabled = True
         self.add_item(select)
+        print(self.pages)
+        print(self.page_len)
         await message.edit(embed=self.pages[self.curr_page], view=self)
         self.message = message
 
@@ -111,5 +113,5 @@ class SongBook(Select):
         self.options[self.key_values.index(value)].default = True
         self.default_val = self.options[self.key_values.index(value)]
 
-        await interaction.response.defer()
+        await interaction.response.send_message("Switching to " + value, ephemeral=True, delete_after=3)
         await chap.send(message=self.message, select=self)

@@ -264,9 +264,10 @@ class QueueEmbed(Embed):
             self.song_entry(song)
 
     def song_entry(self, song: SongEmbed):
-        song_title_link = f"[{song.title}]({song.url})"
-        self.add_field(name=song_title_link, value=song.artist, inline=False)
-        self.add_field(name="Duration", value=song.duration, inline=False)
+        # song_title_link = f"[{song.title}]({song.webpage_url})"
+        self.add_field(name=song.title, value=song.webpage_url, inline=False)
+        self.add_field(name="Artist", value=song.artist, inline=False)
+        self.add_field(name="Duration", value=song.duration, inline=True)
         self.add_field(name="", value="", inline=False)
         
         

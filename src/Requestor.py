@@ -14,14 +14,14 @@ class QueueItem(TypedDict):
 class RequestorDict(TypedDict):
     queue: list[QueueItem]
     text_channel: InteractionChannel
-    viewer: SongBook
+    book: SongBook
 
 class Requestor:
     
     def __init__(self, init: RequestorDict) -> None:
         self.queue = init['queue']
         self.text_channel = init['text_channel']
-        self.viewer = init['viewer']
+        self.book = init['book']
     
     def __getitem__(self, key):
         # Dictionary-style access for attributes
@@ -35,7 +35,7 @@ class Requestor:
         return {
             "queue": self.queue,
             "text_channel": self.text_channel,
-            "viewer": self.viewer,
+            "book": self.book,
         }
         
     @classmethod
@@ -43,6 +43,6 @@ class Requestor:
         return cls(
             queue=data['queue'],
             text_channel=data['text_channel'],
-            viewer=data['viewer'],
+            book=data['book'],
         )
         

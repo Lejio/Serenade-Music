@@ -61,12 +61,15 @@ class Chapter(View):
         
 class SystemContents(dict):
     def __init__(self, songs: list[SongEmbed], paginated_queue: list[QueueEmbed]) -> None:
-        self["Queue"] = Chapter(pages=paginated_queue) # This would be a list of paginated songs (Queue Embeds)
-        self["Songs"] = Chapter(pages=songs) # This would be a list of Song Embeds, giving more detail about each song.
+        if songs:
+            self["Queue"] = Chapter(pages=paginated_queue) # This would be a list of paginated songs (Queue Embeds)
+            self["Songs"] = Chapter(pages=songs) # This would be a list of Song Embeds, giving more detail about each song.
+        else:
+            self["Loading"] = Chapter(pages=[Embed(colour=Colour.blue(), title="Loading...")])
 
 
 class SongBook(Select):
-    def __init__(self, songs: list[SongEmbed], paginated_queue: list[QueueEmbed], message: InteractionMessage) -> None:
+    def __init__(self, songs: list[SongEmbed] | None = None, paginated_queue: list[QueueEmbed] | None = None, message: InteractionMessage = None) -> None:
         self.contents_dictionary = SystemContents(songs, paginated_queue)
         options = [SelectOption(label=v, value=v) for v in self.contents_dictionary]
         super().__init__(min_values=1, max_values=1, options=options)
@@ -82,8 +85,13 @@ class SongBook(Select):
             self.songs = songs
             self.paginated_queue = paginated_queue
         # This should be the default sending of the Embed, therefore it should display the first version of the pokemon every single time.
+        print(songs)
+        print(paginated_queue)
         queue_viewer = Chapter(self.paginated_queue)
-
+        self.contents_dictionary = SystemContents(songs, paginated_queue)
+        self.options = [SelectOption(label=v, value=v) for v in self.contents_dictionary]
+        self.options[0].default = True
+        self.default_val = self.options[0]
         await queue_viewer.send(message=self.message, select=self)
         
     async def callback(self, interaction: Interaction):

@@ -15,7 +15,7 @@ from discord import Colour, Embed, FFmpegPCMAudio, Intents, opus
 from discord import Intents, Interaction, Thread
 from Requestor import QueueItem, Requestor, RequestorDict
 from viewer import SongBook
-from songembed import SongEmbed
+from songembed import QueueEmbed, SongEmbed
 from testembed import TestEmbed
 
 from yt_dlp import YoutubeDL
@@ -48,6 +48,18 @@ SPOTIFY_PLAYLIST_URL = "https://open.spotify.com/playlist"
 load_dotenv()
 # Double check if the Opus library is loaded
 ctypes.util.find_library('opus')
+
+def construct_pages(requestor: Requestor):
+    songs = [item['embed'] for item in requestor.queue]  # Extract the embeds from the queue
+    paginated_queue: list[QueueEmbed] = []
+    pagination_size = 5  # Number of songs per page
+
+    # Create chunks of songs, 5 per chunk
+    for i in range(0, len(songs), pagination_size):
+        paginated_queue.append(QueueEmbed(list_songs=songs[i:i + pagination_size]))
+
+    return paginated_queue, songs
+
 
 def add_to_queue_from_search(query: str, requestor: Requestor) -> bool:
     """Adds a song to the queue from a search string.\n
@@ -138,12 +150,20 @@ class SystemMusic(commands.Bot):
         # Clean up any active voice clients
         for vc in self.voice_clients:
             await vc.disconnect()
+            
+    def after_song_ends(self, error: Exception | None, guild_id, requestor: Requestor) -> None:
+        if error:
+            print(f"Error occurred: {error}")
+        else:
+            print("Song has finished playing.")
+            requestor.queue.pop(0)
+            asyncio.run_coroutine_threadsafe(self.play_next(guild_id, requestor), self.loop)
 
     async def play_next(self, guild_id: int, requestor: Requestor) -> None:
         if len(self.queue[guild_id]['queue']) > 0:
             voice = self.get_guild(guild_id).voice_client
             if voice and not voice.is_playing():
-                next_song = self.queue[guild_id]['queue'].pop(0)
+                next_song: QueueItem = self.queue[guild_id]['queue'][0]
                 with YoutubeDL(YDL_OPTIONS) as ydl:
                     unsanitized_info = ydl.extract_info(next_song['url'], download=False)
                     URL = unsanitized_info['url']
@@ -152,9 +172,11 @@ class SystemMusic(commands.Bot):
                     # if info['title'] != "videoplayback" and info['title'] != None:
                     self.current_song = next_song['title']
                         # print(self.current_song)
-                await requestor.text_channel.send(f'Now playing: {self.current_song}')
+                # await requestor.text_channel.send(f'Now playing: {self.current_song}')
+                # pag_queue, songs, = construct_pages(requestor)
+                # await requestor.book.send(songs=songs, paginated_queue=pag_queue)
                 ffmpeg_path = os.path.join(os.path.dirname(__file__), 'ffmpeg.exe')
-                voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id, requestor), self.loop))
+                voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: self.after_song_ends(e, guild_id, requestor))
         else:
             print("Queue is empty, nothing to play next.")
 
@@ -189,23 +211,25 @@ async def join(interaction: Interaction):
 
 @client.tree.command(
     name="play",
-    description="Play sound from a youtube URL."
+    description="Play music from Youtube and Spotify."
 )
 async def play(interaction: Interaction, url: str | None = None, search: str | None = None):
     # Check if the guild has a queue
     if interaction.guild_id not in client.queue:
+        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Loading..."))
+        msg = await interaction.original_response()
         requestor: RequestorDict = {
         "queue": [],
         "text_channel": interaction.channel,  # or a GuildChannel/PrivateChannel/Thread object
-        "book": SongBook([], [])
+        "book": SongBook(message=msg)
         }
         client.queue[interaction.guild_id] = requestor
-        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Joining voice channel..."))
-    elif interaction.channel_id != client.queue[interaction.guild_id]['text_channel']:
+        
+    elif interaction.channel_id != client.queue[interaction.guild_id]['text_channel'].id:
         await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."), ephemeral=True)
         return
-    
-    
+    else:
+        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Loading..."), ephemeral=True, delete_after=10)
         
     requestor: Requestor = Requestor(client.queue[interaction.guild_id])
     # Get the voice channel of the user
@@ -292,17 +316,14 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         requestor.queue.append(qitem)
         
     if not voice.is_playing():
-        # voice.play(FFmpegPCMAudio(URL, executable=ffmpeg_path, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(client.play_next(interaction.guild_id, interaction.channel), client.loop))
-        # await interaction.response.send_message(f'Now playing: {title}')
-        await interaction.followup.send(f'Now playing: {title}')
-        await client.play_next(interaction.guild_id, interaction.channel)
-        # await interaction.response.send_message(f'Now playing: {title}')
+        # await interaction.followup.send(f'Now playing: {title}')
+        pag_queue, songs = construct_pages(requestor)
+        await requestor.book.send(songs=songs, paginated_queue=pag_queue)
+        await client.play_next(interaction.guild_id, requestor)
         return
     else:
-        song = SongEmbed(song=info)
-        qitem: QueueItem = {'url': URL, 'title': title, 'embed': song}
-        requestor.queue.append(qitem)
-        await requestor.text_channel.send(f"Added to queue: {title}")
+        pag_queue, songs = construct_pages(requestor)
+        await requestor.book.send(songs=songs, paginated_queue=pag_queue)
         return
     
 @client.tree.command(

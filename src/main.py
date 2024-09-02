@@ -13,8 +13,8 @@ from discord.abc import GuildChannel, PrivateChannel
 from discord.ext import commands
 from discord import Colour, Embed, FFmpegPCMAudio, Intents, opus
 from discord import Intents, Interaction, Thread
-from Requestor import QueueItem, Requestor, RequestorDict
-from viewer import SongBook
+from requestor import QueueItem, Requestor, RequestorDict
+from book import SongBook
 from songembed import QueueEmbed, SongEmbed
 from testembed import TestEmbed
 
@@ -43,6 +43,16 @@ YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 YOUTUBE_URL = "https://www.youtube.com/watch?v="
 YOUTUBE_PLAYLIST_URL = "https://www.youtube.com/playlist?list="
 SPOTIFY_PLAYLIST_URL = "https://open.spotify.com/playlist"
+CHANNEL_ID = "channel_id"
+MESSAGE_ID = "message_id"
+TITLE = "title"
+URL = "url"
+EMBED = "embed"
+NAME = "name"
+QUEUE = "queue"
+BOOK = "book"
+
+ENCODING = 'utf-8'
 
 # Load environment variables
 load_dotenv()
@@ -50,7 +60,7 @@ load_dotenv()
 ctypes.util.find_library('opus')
 
 def construct_pages(requestor: Requestor):
-    songs = [item['embed'] for item in requestor.queue]  # Extract the embeds from the queue
+    songs = [item[EMBED] for item in requestor.queue]  # Extract the embeds from the queue
     paginated_queue: list[QueueEmbed] = []
     pagination_size = 5  # Number of songs per page
 
@@ -80,7 +90,7 @@ def add_to_queue_from_search(query: str, requestor: Requestor) -> bool:
     search_keyword = YOUTUBE_SEARCH_URL + encoded_query # Appends the encoded query to the YouTube search URL
     html = urllib.request.urlopen(search_keyword) # Opens the URL
     # print("Inside query search:", search_keyword)
-    video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode('utf-8')) # Finds all video IDs in the HTML
+    video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode(ENCODING)) # Finds all video IDs in the HTML
     
     if not video_ids: # If no video IDs are found, return False
         return False
@@ -90,10 +100,10 @@ def add_to_queue_from_search(query: str, requestor: Requestor) -> bool:
     with YoutubeDL(YDL_OPTIONS) as ydl:
         unsanitized_info = ydl.extract_info(url, download=False) # Extracts the info of the video
         info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
-        title = info['title'] # Extracts the title of the video
+        title = info[TITLE] # Extracts the title of the video
         # print(title)
         song = SongEmbed(song=info)
-        qitem: QueueItem = {'url': url, 'title': title, 'embed': song}
+        qitem: QueueItem = {URL: url, TITLE: title, EMBED: song}
         requestor.queue.append(qitem) # Appends the video URL and title to the queue
 
 async def add_to_queue_async(query: str, requestor: Requestor) -> bool:
@@ -125,10 +135,10 @@ def construct_search_query(name: str, artists: list) -> str:
     Returns:
         str: The constructed search query in the format "name by artist1, artist2, artist3"
     """
-    artist_names = ', '.join(artist['name'] for artist in artists)
+    artist_names = ', '.join(artist[NAME] for artist in artists)
     return f"{name} by {artist_names}"
 
-class SystemMusic(commands.Bot):
+class SerenadeMusic(commands.Bot):
     def __init__(self, command_prefix=".", description: str | None = None, intents=Intents.all()) -> None:
         super().__init__(command_prefix, description=description, intents=intents)
         self.queue = {}
@@ -158,6 +168,7 @@ class SystemMusic(commands.Bot):
             print("Song has finished playing.")
             # Only pop if the queue is not empty
             if requestor.queue:
+                print("Popping in after_song_ends")
                 requestor.queue.pop(0)
             print("Stuff left in Queue", requestor.queue)
             # Ensure coroutine is properly awaited
@@ -183,12 +194,12 @@ class SystemMusic(commands.Bot):
                 print("Queue is empty, nothing to play next.")
                 pag_queue, songs = construct_pages(requestor)
                 print("Before sending", songs, pag_queue)
-                await requestor.book.send(songs=songs, paginated_queue=pag_queue)
+                await requestor.book.send(songs=songs, paginated_queue=pag_queue, client=client)
         # except Exception as e:
         #     print(f"Error in play_next: {e}")
 
 
-client = SystemMusic()
+client = SerenadeMusic()
 # client.add_view(SongViewer([], timeout=None))
 
 @client.tree.command(
@@ -233,16 +244,17 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         msg = await interaction.original_response()
         requestor: RequestorDict = {
         "queue": [],
-        "text_channel": interaction.channel,  # or a GuildChannel/PrivateChannel/Thread object
-        "book": SongBook(message=msg)
+        CHANNEL_ID: interaction.channel.id,  # or a GuildChannel/PrivateChannel/Thread object
+        MESSAGE_ID: msg.id,
+        BOOK: SongBook(message_id=msg.id, channel_id=interaction.channel.id)
         }
         client.queue[interaction.guild_id] = requestor
         
-    elif interaction.channel_id != client.queue[interaction.guild_id]['text_channel'].id:
+    elif interaction.channel_id != client.queue[interaction.guild_id][CHANNEL_ID]:
         await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."), ephemeral=True)
         return
     else:
-        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Loading..."), ephemeral=True, delete_after=10)
+        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Loading..."), ephemeral=True, delete_after=3)
         
     requestor: Requestor = Requestor(client.queue[interaction.guild_id])
     # Get the voice channel of the user
@@ -268,7 +280,6 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
             p = Playlist(url)
             for video in p.videos:
                 playlist.append(f"{video.title} by {video.author}")
-                print("Metadata", video.metadata)
                 song = SongEmbed(song=video.metadata)
                 qitem: QueueItem = {'url': video.watch_url, 'title': video.title, 'embed': song}
                 requestor.queue.append(qitem)
@@ -303,8 +314,10 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
                     await add_to_queue_async(query=title, requestor=requestor)
                     if not voice.is_playing():
                         await client.play_next(interaction.guild_id, requestor)
-
-                await requestor.text_channel.send(f"Spotify song(s) added to queue: {playlist}")
+                
+                # req_channel = client.get_channel(requestor.channel_id)
+                # req_message = await req_channel.fetch_message(requestor.message_id)
+                # await requestor.text_channel.send(f"Spotify song(s) added to queue: {playlist}")
                 await client.play_next(interaction.guild_id, requestor)
                 return
             # except Exception as e:
@@ -318,23 +331,22 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
         
     with YoutubeDL(YDL_OPTIONS) as ydl:
         unsanitized_info = ydl.extract_info(url, download=False)
-        URL = unsanitized_info['url']
+        song_origin_url = unsanitized_info[URL]
         info = json.loads(json.dumps(ydl.sanitize_info(unsanitized_info)))
-        title = info['title']
-        print("Playing song:", title)
-        song = SongEmbed(song=info)
-        qitem: QueueItem = {'url': URL, 'title': title, 'embed': song}
+        title = info[TITLE]
+        song = SongEmbed(song=info, author=interaction.user.mention)
+        qitem: QueueItem = {URL: song_origin_url, TITLE: title, EMBED: song}
         requestor.queue.append(qitem)
         
     if not voice.is_playing():
         # await interaction.followup.send(f'Now playing: {title}')
         pag_queue, songs = construct_pages(requestor)
-        await requestor.book.send(songs=songs, paginated_queue=pag_queue)
+        await requestor.book.send(songs=songs, paginated_queue=pag_queue, client=client)
         await client.play_next(interaction.guild_id, requestor)
         return
     else:
         pag_queue, songs = construct_pages(requestor)
-        await requestor.book.send(songs=songs, paginated_queue=pag_queue)
+        await requestor.book.send(songs=songs, paginated_queue=pag_queue, client=client)
         return
     
 @client.tree.command(
@@ -413,17 +425,21 @@ async def resume(interaction: Interaction):
 )
 async def skip(interaction: Interaction):
     voice = interaction.guild.voice_client
-    await interaction.response.defer()
-    if voice.is_playing():
-        voice.stop()
-        requestor: Requestor = client.queue[interaction.guild_id]
-        requestor.queue.pop(0)
-        prag_queue, songs = construct_pages(requestor)
-        await requestor.book.send(prag_queue, songs)
-        await interaction.followup.send(f"Skipping {client.current_song}", ephemeral=True, delete_after=10)
-        await client.play_next(interaction.guild_id, requestor)
-        # print(f"Songs left in queue: {client.queue[interaction.guild_id]}")
-    else:
-        await interaction.followup.send("Bot is not playing anything.", ephemeral=True, delete_after=10)
+    # await interaction.response.defer()
+    if voice:
+        if voice.is_playing():
+            print("Skipping")
+            voice.stop()
+            await interaction.response.send_message(f"Skipping {client.current_song}", ephemeral=True, delete_after=3)
+            requestor = Requestor(client.queue[interaction.guild_id])
+            # requestor.queue.pop(0)
+            print("Popping inside skip")
+            prag_queue, songs = construct_pages(requestor)
+            await requestor.book.send(paginated_queue=prag_queue, songs=songs, client=client)
+            
+            await client.play_next(interaction.guild_id, requestor)
+            # print(f"Songs left in queue: {client.queue[interaction.guild_id]}")
+        else:
+            await interaction.response.send_message("Bot is not playing anything.", ephemeral=True, delete_after=3)
 
 client.run(os.environ.get('DISCORD_TOKEN'))

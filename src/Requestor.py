@@ -1,7 +1,7 @@
 from typing import Optional, TypedDict, Union
 from discord.abc import GuildChannel, PrivateChannel
-from discord import Thread
-from viewer import SongBook
+from discord import Thread, User
+from book import SongBook
 from songembed import SongEmbed
 
 InteractionChannel = Optional[Union[GuildChannel, PrivateChannel, Thread]]
@@ -10,17 +10,20 @@ class QueueItem(TypedDict):
     title: str
     url: str
     embed: SongEmbed
+    author: User
 
 class RequestorDict(TypedDict):
     queue: list[QueueItem]
-    text_channel: InteractionChannel
+    channel_id: int
+    message_id: int 
     book: SongBook
 
 class Requestor:
     
     def __init__(self, init: RequestorDict) -> None:
         self.queue = init['queue']
-        self.text_channel = init['text_channel']
+        self.channel_id = init['channel_id']
+        self.message_id = init['message_id']
         self.book = init['book']
     
     def __getitem__(self, key):
@@ -34,7 +37,8 @@ class Requestor:
     def to_dict(self):
         return {
             "queue": self.queue,
-            "text_channel": self.text_channel,
+            "channel_id": self.channel_id,
+            "message_id": self.message_id,
             "book": self.book,
         }
         
@@ -42,7 +46,8 @@ class Requestor:
     def from_dict(cls, data):
         return cls(
             queue=data['queue'],
-            text_channel=data['text_channel'],
+            channel_id=data['channel_id'],
+            message_id=data['message_id'],
             book=data['book'],
         )
         

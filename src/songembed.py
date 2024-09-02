@@ -6,21 +6,15 @@ import json
 
 
 class SongEmbed(Embed):
-    def __init__(self, song, **kwargs):
+    def __init__(self, song, author, **kwargs):
         super().__init__(**kwargs)
-        # print(song)
-        # print("ID", song["id"])
         self.id = song["id"]
-        # print("Title", song["title"])
         self.title = song["title"]
-        # print("Thumbnail", song["thumbnail"])
         self._thumbnails = song["thumbnails"]
-        # print("Artist", song["artist"] if "artist" in song else song["uploader"])
         self.artist = song["artist"] if "artist" in song else song["uploader"]
-        # print("Duration", song["duration"])
         self.duration = song["duration"]
-        # print("Webpage URL", song["webpage_url"])
         self.url = song["webpage_url"]
+        self.request_user = author
         
 
         # self.set_image(url=self._thumbnail)
@@ -275,103 +269,9 @@ class QueueEmbed(Embed):
                 value=song_title_link,
                 inline=True)
         self.add_field(name="Requested By:",
-                        value="@lejio",
+                        value=song.request_user,
                         inline=True)
         self.add_field(name="Duration",
                         value=f"{song.duration // 60}:{song.duration % 60:02d}",
                         inline=True)
         self.add_field(name="", value="", inline=False)
-        
-        
-# self.id = song["id"]
-# self.title = song["title"]
-# self.formats = song["formats"]
-# self.thumbnails = song["thumbnails"]
-# self.thumbnail = song["thumbnail"]
-# self.description = song["description"]
-# self.channel_id = song["channel_id"]
-# self.channel_url = song["channel_url"]
-# self.duration = song["duration"]
-# self.view_count = song["view_count"]
-# self.average_rating = song["average_rating"]
-# self.age_limit = song["age_limit"]
-# self.webpage_url = song["webpage_url"]
-# self.categories = song["categories"]
-# self.tags = song["tags"]
-# self.playable_in_embed = song["playable_in_embed"]
-# self.live_status = song["live_status"]
-# self.release_timestamp = song["release_timestamp"]
-# self._format_sort_fields = song["_format_sort_fields"]
-# self.automatic_captions = song["automatic_captions"]
-# self.subtitles = song["subtitles"]
-# self.album = song["album"]
-# self.artists = song["artists"]
-# self.track = song["track"]
-# self.release_date = song["release_date"]
-# self.release_year = song["release_year"]
-# self.comment_count = song["comment_count"]
-# self.chapters = song["chapters"]
-# self.heatmap = song["heatmap"]
-# self.like_count = song["like_count"]
-# self.channel = song["channel"]
-# self.channel_follower_count = song["channel_follower_count"]
-# self.channel_is_verified = song["channel_is_verified"]
-# self.uploader = song["uploader"]
-# self.uploader_id = song["uploader_id"]
-# self.uploader_url = song["uploader_url"]
-# self.upload_date = song["upload_date"]
-# self.creators = song["creators"]
-# self.alt_title = song["alt_title"]
-# self.availability = song["availability"]
-# self.original_url = song["original_url"]
-# self.webpage_url_basename = song["webpage_url_basename"]
-# self.webpage_url_domain = song["webpage_url_domain"]
-# self.extractor = song["extractor"]
-# self.extractor_key = song["extractor_key"]
-# self.playlist = song["playlist"]
-# self.playlist_index = song["playlist_index"]
-# self.display_id = song["display_id"]
-# self.fulltitle = song["fulltitle"]
-# self.duration_string = song["duration_string"]
-# self.is_live = song["is_live"]
-# self.was_live = song["was_live"]
-# self.artist = song["artist"]
-# self.creator = song["creator"]
-# self.requested_subtitles = song["requested_subtitles"]
-# self._has_drm = song["_has_drm"]
-# self.epoch = song["epoch"]
-# self.asr = song["asr"]
-# self.filesize = song["filesize"]
-# self.format_id = song["format_id"]
-# self.format_note = song["format_note"]
-# self.source_preference = song["source_preference"]
-# self.fps = song["fps"]
-# self.audio_channels = song["audio_channels"]
-# self.height = song["height"]
-# self.quality = song["quality"]
-# self.has_drm = song["has_drm"]
-# self.tbr = song["tbr"]
-# self.filesize_approx = song["filesize_approx"]
-# self.url = song["url"]
-# self.width = song["width"]
-# self.language = song["language"]
-# self.language_preference = song["language_preference"]
-# self.preference = song["preference"]
-# self.ext = song["ext"]
-# self.vcodec = song["vcodec"]
-# self.acodec = song["acodec"]
-# self.dynamic_range = song["dynamic_range"]
-# self.container = song["container"]
-# self.downloader_options = song["downloader_options"]
-# self.protocol = song["protocol"]
-# self.resolution = song["resolution"]
-# self.aspect_ratio = song["aspect_ratio"]
-# self.http_headers = song["http_headers"]
-# self.audio_ext = song["audio_ext"]
-# self.video_ext = song["video_ext"]
-# self.vbr = song["vbr"]
-# self.abr = song["abr"]
-# self.format = song["format"]
-# self._type = song["_type"]
-# self._version = song["_version"]
-# print("Self", self)

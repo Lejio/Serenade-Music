@@ -1,6 +1,7 @@
 from discord import Colour, Embed
 from discord.ui import View, Button, Select, Item, button
 from discord import Embed, InteractionMessage, Interaction, SelectOption
+from discord.ext import commands
 from songembed import QueueEmbed, SongEmbed
 import uuid
 
@@ -104,36 +105,33 @@ class SerenadeContents(dict):
 
 
 class SongBook(Select):
-    def __init__(self, songs: list[SongEmbed] | None = None, paginated_queue: list[QueueEmbed] | None = None, message: InteractionMessage = None) -> None:
+    def __init__(self, songs: list[SongEmbed] | None = None, paginated_queue: list[QueueEmbed] | None = None, message_id: int = int, channel_id: int = int) -> None:
         self.contents_dictionary = SerenadeContents(songs, paginated_queue)
         options = [SelectOption(label=v, value=v) for v in self.contents_dictionary]
         super().__init__(min_values=1, max_values=1, options=options)
-        self.message = message
         self.options[0].default = True
         self.default_val = self.options[0]
+        self.channel_id = channel_id
+        self.message_id = message_id
         self.key_values = ["Queue", "Songs"]
         self.songs = songs
         self.paginated_queue = paginated_queue
 
-    async def send(self, songs: list[SongEmbed] | None = None, paginated_queue: list[QueueEmbed] | None = None):
+    async def send(self, client: commands.Bot, songs: list[SongEmbed] | None = None, paginated_queue: list[QueueEmbed] | None = None):
         if songs is not None:
-            print("Goobie")
             self.songs = songs
             self.paginated_queue = paginated_queue
-        # elif len(songs) == 0:
-        #     print("Goober")
-            
-        # This should be the default sending of the Embed, therefore it should display the first version of the pokemon every single time.
-        # print(songs)
-        # print(paginated_queue)
+        
+        ref_channel = client.get_channel(self.channel_id)
+        ref_message = await ref_channel.fetch_message(self.message_id)
         self.contents_dictionary = SerenadeContents(songs, paginated_queue)
-        print(self.contents_dictionary)
+
         queue_viewer = self.contents_dictionary["Queue"]
         self.options = [SelectOption(label=v, value=v) for v in self.contents_dictionary]
         self.options[0].default = True
         self.default_val = self.options[0]
         self.custom_id = str(uuid.uuid4())
-        await queue_viewer.send(message=self.message, select=self, pages=self.paginated_queue)
+        await queue_viewer.send(message=ref_message, select=self, pages=self.paginated_queue)
         
     async def callback(self, interaction: Interaction):
         

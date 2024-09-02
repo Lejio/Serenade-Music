@@ -1,4 +1,4 @@
-# System-Music
+# Serenade-Music
 
 A simple self hosted Discord bot.
 

@@ -9,22 +9,27 @@ class SongEmbed(Embed):
     def __init__(self, song, **kwargs):
         super().__init__(**kwargs)
         # print(song)
-        print("ID", song["id"])
+        # print("ID", song["id"])
         self.id = song["id"]
-        print("Title", song["title"])
+        # print("Title", song["title"])
         self.title = song["title"]
-        print("Thumbnail", song["thumbnail"])
-        self._thumbnail = song["thumbnail"]
-        print("Artist", song["artist"] if "artist" in song else song["uploader"])
+        # print("Thumbnail", song["thumbnail"])
+        self._thumbnails = song["thumbnails"]
+        # print("Artist", song["artist"] if "artist" in song else song["uploader"])
         self.artist = song["artist"] if "artist" in song else song["uploader"]
-        print("Duration", song["duration"])
+        # print("Duration", song["duration"])
         self.duration = song["duration"]
-        print("Webpage URL", song["webpage_url"])
-        self.webpage_url = song["webpage_url"]
+        # print("Webpage URL", song["webpage_url"])
+        self.url = song["webpage_url"]
         
-        self.set_image(url=self._thumbnail)
-        self.add_field(name="Title", value=self.title, inline=False)
-        self.add_field(name="Artist", value=self.artist, inline=False)
+
+        # self.set_image(url=self._thumbnail)
+        for i in range(len(self._thumbnails) - 1, -1, -1):
+            if ".jpg" in self._thumbnails[i]["url"] or ".png" in self._thumbnails[i]["url"]:
+                self.set_thumbnail(url=self._thumbnails[i]["url"])
+                break
+
+        self.set_author(name="Serenade Music")
 
     def __getitem__(self, key):
         # Dictionary-style access for attributes
@@ -259,15 +264,22 @@ class QueueEmbed(Embed):
             description=description,
             timestamp=timestamp,
         )
-        
-        for song in list_songs:
-            self.song_entry(song)
+        self.title = ":notes: Serenade Player :notes:"
+        self.description="Use the webview :desktop: or `\play` command to add songs! You can use the search option or use the url option for specific songs! Youtube and Spotify songs supported."
+        for song in range(len(list_songs)):
+            self.song_entry(list_songs[song], song)
 
-    def song_entry(self, song: SongEmbed):
-        # song_title_link = f"[{song.title}]({song.webpage_url})"
-        self.add_field(name=song.title, value=song.webpage_url, inline=False)
-        self.add_field(name="Artist", value=song.artist, inline=False)
-        self.add_field(name="Duration", value=song.duration, inline=True)
+    def song_entry(self, song: SongEmbed, song_index: int):
+        song_title_link = f"[{song.title}]({song.url})"
+        self.add_field(name=f"{f'Playing :cd:' if song_index == 0 else f'{song_index + 1} in Queue'}:",
+                value=song_title_link,
+                inline=True)
+        self.add_field(name="Requested By:",
+                        value="@lejio",
+                        inline=True)
+        self.add_field(name="Duration",
+                        value=f"{song.duration // 60}:{song.duration % 60:02d}",
+                        inline=True)
         self.add_field(name="", value="", inline=False)
         
         

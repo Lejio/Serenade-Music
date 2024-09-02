@@ -7,6 +7,15 @@ from songembed import SongEmbed
 InteractionChannel = Optional[Union[GuildChannel, PrivateChannel, Thread]]
 
 class QueueItem(TypedDict):
+    """Song item in the queue.\n
+    title: str\n
+    url: str\n
+    embed: SongEmbed\n
+    author: User\n
+
+    Args:
+        TypedDict (_type_): _description_
+    """
     title: str
     url: str
     embed: SongEmbed

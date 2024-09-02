@@ -200,7 +200,6 @@ class SerenadeMusic(commands.Bot):
 
 
 client = SerenadeMusic()
-# client.add_view(SongViewer([], timeout=None))
 
 @client.tree.command(
     name="join",
@@ -224,7 +223,7 @@ async def join(interaction: Interaction):
     
     paginated_queue = [TestEmbed(name="Goofy Shit", icon=interaction.user.display_icon),
              TestEmbed(name="LMAO", icon=interaction.user.display_icon)]
-    testview = SongBook(songs=songs, paginated_queue=paginated_queue, message=message)
+    testview = SongBook(songs=songs, paginated_queue=paginated_queue, message_id=message.id, channel_id=interaction.channel_id)
     
     await testview.send()
 
@@ -253,8 +252,6 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
     elif interaction.channel_id != client.queue[interaction.guild_id][CHANNEL_ID]:
         await interaction.response.send_message(embed=Embed(colour=Colour.red(), title="Please use the same text channel for the queue."), ephemeral=True)
         return
-    else:
-        await interaction.response.send_message(embed=Embed(colour=Colour.blue(), title="Loading..."), ephemeral=True, delete_after=3)
         
     requestor: Requestor = Requestor(client.queue[interaction.guild_id])
     # Get the voice channel of the user
@@ -273,27 +270,54 @@ async def play(interaction: Interaction, url: str | None = None, search: str | N
 
     # Check if the user provided a URL or search keyword
     
-    if url != None and search == None:
+    if url is not None and search is None:
         playlist = []
         if YOUTUBE_PLAYLIST_URL in url:
-            print("Youtube Playlist URL")
-            p = Playlist(url)
-            for video in p.videos:
-                playlist.append(f"{video.title} by {video.author}")
-                song = SongEmbed(song=video.metadata)
-                qitem: QueueItem = {'url': video.watch_url, 'title': video.title, 'embed': song}
-                requestor.queue.append(qitem)
-            await client.play_next(interaction.guild_id, requestor)
+            print("Loading playlist...")
+            ydl_opts = {
+                'extract_flat': True,  # Extract playlist video URLs without downloading
+                'skip_download': True,  # Skip downloading video data
+                'quiet': True
+            }
+
+            # Use yt_dlp to get the playlist information
+            with YoutubeDL(ydl_opts) as ydl:
+                playlist_info = ydl.extract_info(url, download=False)
+            
+            # Check if the playlist contains entries (videos)
+            if 'entries' in playlist_info:
+                for entry in playlist_info['entries']:
+                    video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                    print("Loading video:", video_url)
+
+                    # Extract full metadata for each video in the playlist
+                    with YoutubeDL(YDL_OPTIONS) as ydl:
+                        video_info = ydl.extract_info(video_url, download=False)
+                    
+                    # Extract relevant information from video metadata
+                    song = SongEmbed(song=video_info, author=interaction.user.mention)
+                    qitem: QueueItem = {'url': video_url, 'title': video_info['title'], 'embed': song, 'author': interaction.user.mention}
+                    requestor.queue.append(qitem)
+                    playlist.append(f"{video_info['title']} by {video_info.get('uploader', 'Unknown')}")
+            
+                    # Play the next song if not currently playing
+                    pag_queue, songs = construct_pages(requestor)
+                    await requestor.book.send(songs=songs, paginated_queue=pag_queue, client=client)
+                    if not voice.is_playing():
+                        await client.play_next(guild_id=interaction.guild_id, requestor=requestor)
             return
+
             
         # ================== SPOTIFY ==================
-        elif SPOTIFY_PLAYLIST_URL in url or "open.spotify.com/track" in url:
+        elif SPOTIFY_PLAYLIST_URL in url or "open.spotify.com/track" in url or "open.spotify.com/album" in url:
             # try:
                 if "playlist" in url or "album" in url:
-                    print("Spotify Playlist URL")
-                    spotify_pl = client.sp.playlist(url)
+                    spotify_pl = client.sp.playlist(url) if "playlist" in url else client.sp.album(url)
                     if spotify_pl is None:
-                        await requestor.text_channel.send(embed=Embed(colour=Colour.red(), title="Cannot find Spotify playlist."), ephemeral=True)
+                        if channel:
+                            await channel.send(embed=Embed(colour=Colour.red(), title="Cannot find Spotify playlist."), ephemeral=True)
+                        else:
+                            print("Cannot find Spotify playlist and cannot find original message.")
                         return
 
                     # Process Spotify Playlist
@@ -428,17 +452,13 @@ async def skip(interaction: Interaction):
     # await interaction.response.defer()
     if voice:
         if voice.is_playing():
-            print("Skipping")
             voice.stop()
             await interaction.response.send_message(f"Skipping {client.current_song}", ephemeral=True, delete_after=3)
             requestor = Requestor(client.queue[interaction.guild_id])
-            # requestor.queue.pop(0)
-            print("Popping inside skip")
             prag_queue, songs = construct_pages(requestor)
             await requestor.book.send(paginated_queue=prag_queue, songs=songs, client=client)
             
             await client.play_next(interaction.guild_id, requestor)
-            # print(f"Songs left in queue: {client.queue[interaction.guild_id]}")
         else:
             await interaction.response.send_message("Bot is not playing anything.", ephemeral=True, delete_after=3)
 

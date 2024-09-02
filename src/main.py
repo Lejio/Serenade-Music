@@ -10,6 +10,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from discord.abc import GuildChannel, PrivateChannel
+import logging
 from discord.ext import commands
 from discord import Colour, Embed, FFmpegPCMAudio, Intents, opus
 from discord import Intents, Interaction, Thread
@@ -462,4 +463,5 @@ async def skip(interaction: Interaction):
         else:
             await interaction.response.send_message("Bot is not playing anything.", ephemeral=True, delete_after=3)
 
-client.run(os.environ.get('DISCORD_TOKEN'))
+handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode="w")
+client.run(os.environ.get('DISCORD_TOKEN'), log_handler=handler)

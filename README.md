@@ -1,4 +1,8 @@
-# Serenade-Music
+<div align="center">
+  <picture>
+    <img alt="Serenade Music Logo" src="https://raw.githubusercontent.com/Lejio/Serenade-Music/1cf7040ee03df9a5229f5f94804f887b6c3f1354/serenade_music_logo.svg">
+  </picture>
+</div>
 
 Serenade Music is a Discord bot that allows you to play music in your server.
 

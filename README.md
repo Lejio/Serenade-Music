@@ -1,7 +1,5 @@
 <div align="center">
-  <picture>
-    <img alt="Serenade Music Logo" src="https://raw.githubusercontent.com/Lejio/Serenade-Music/1cf7040ee03df9a5229f5f94804f887b6c3f1354/serenade_music_logo.svg">
-  </picture>
+  <img alt="Serenade Music Logo" src="https://raw.githubusercontent.com/Lejio/Serenade-Music/1cf7040ee03df9a5229f5f94804f887b6c3f1354/serenade_music_logo.svg">
 </div>
 
 <h1 align="center">Discord Music Bot Template</h1>

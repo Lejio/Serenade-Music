@@ -1,5 +1,7 @@
 # Serenade-Music
 
-A simple self hosted Discord bot.
+Serenade Music is a Discord bot that allows you to play music in your server.
 
-Requires ffmpeg and compilation of libopus.
+The bot is written is Python and utilizes the latest Discord.py library.
+
+You can Serenade Music as a template to build your own bot with similar music functionalities.

@@ -45,8 +45,8 @@ SPOTIFY_CLIENT_SECRET="XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
 ### Features under construction:
 
--[ ] Play from spotify
--[ ] Search songs
--[ ] Add playlists
+- [ ] Play from spotify
+- [ ] Search songs
+- [ ] Add playlists
 
 

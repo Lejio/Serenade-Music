@@ -4,7 +4,7 @@
 
 <h1 align="center">Discord Music Bot Template</h1>
 
-<p align="center">Serenade Music is a Discord bot that allows you to play music in your server. The bot is written is Python and utilizes the latest Discord.py library. You can Serenade Music as a template to build your own bot with similar music functionalities.</p>
+<p align="center">Serenade Music is a Discord bot that allows you to play music in your server. The bot is written is Python and utilizes the latest Discord.py library. You can use Serenade Music as a template to build your own bot with similar music functionalities.</p>
 
 ## Setup
 
